@@ -161,15 +161,14 @@ volumioAppearance.prototype.getUiSettings = function()
     var language = config.get('language_code');
     var theme = config.get('theme');
     var background_type = config.get('background_type');
-    var metatitle = config.get('metatitle', 'Volumio - Audiophile Music Player');
 
     if (background_type === 'background') {
         var background_title = config.get('background_title');
         var background_path = config.get('background_path');
-        var UiSettings = {"background":{"title":background_title, "path":background_path},"language":language, "theme":theme, "pageTitle":metatitle}
+        var UiSettings = {"background":{"title":background_title, "path":background_path},"language":language, "theme":theme}
     } else {
         var background_color = config.get('background_color');
-        var UiSettings = {"color":background_color, "language":language, "theme":theme, "pageTitle":metatitle}
+        var UiSettings = {"color":background_color, "language":language, "theme":theme}
     }
 
     defer.resolve(UiSettings);
@@ -309,6 +308,14 @@ volumioAppearance.prototype.setLanguage = function(data)
         config.set('language', data.language.label);
         config.set('language_code', data.language.value);
         this.commandRouter.sharedVars.set('language_code',data.language.value);
+
+        var menu = self.commandRouter.getMenuItems();
+        if (menu != undefined) {
+            menu.then(function (menu) {
+                self.commandRouter.broadcastMessage('pushMenuItems', menu);
+                self.commandRouter.updateBrowseSourcesLang();
+            });
+        }
     }
 
     if (!data.disallowReload) {
@@ -316,8 +323,6 @@ volumioAppearance.prototype.setLanguage = function(data)
             self.commandRouter.getI18nString('APPEARANCE.NEW_LANGUAGE_SET'));
 
         var data = self.getUiSettings();
-        self.commandRouter.updateBrowseSourcesLang();
-
         if (data != undefined) {
             data.then(function (data) {
                 self.commandRouter.broadcastMessage('pushUiSettings', data);

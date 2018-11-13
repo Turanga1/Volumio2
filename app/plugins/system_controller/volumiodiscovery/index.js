@@ -9,7 +9,7 @@ var io=require('socket.io-client');
 var exec = require('child_process').exec;
 var libQ = require('kew');
 var ip = require('ip');
-var ifconfig = require('wireless-tools/ifconfig');
+var ifconfig = require('/volumio/app/plugins/system_controller/network/lib/ifconfig.js');
 
 // Define the ControllerVolumioDiscovery class
 
@@ -195,7 +195,9 @@ ControllerVolumioDiscovery.prototype.startMDNSBrowse=function()
 
 		self.browser.on('error',function(error){
 			self.context.coreCommand.pushConsoleMessage('mDNS Browse raised the following error ' + error);
-			self.startMDNSBrowse();
+			// Do not start mdns browser, since it will duplicate its instance
+			// Find a way to reinstantiate, if possible
+			//self.startMDNSBrowse();
 		});
 		self.browser.on('serviceUp', function(service) {
 

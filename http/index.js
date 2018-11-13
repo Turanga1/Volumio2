@@ -1,8 +1,6 @@
 var express = require('express');
 var compression = require('compression')
 var path = require('path');
-var favicon = require('serve-favicon');
-var cookieParser = require('cookie-parser');
 var bodyParser = require('body-parser');
 var routes = require('./routes.js');
 var restapi = require('./restapi.js');
@@ -39,11 +37,8 @@ var allowCrossDomain = function(req, res, next) {
 dev.set('views', path.join(__dirname, 'dev/views'));
 dev.set('view engine', 'ejs');
 
-// uncomment after placing your favicon in /public
-//app.use(favicon(__dirname + '/public/favicon.ico'));
 dev.use(bodyParser.json());
 dev.use(bodyParser.urlencoded({ extended: false }));
-dev.use(cookieParser());
 dev.use(express.static(path.join(__dirname, 'dev')));
 
 dev.use('/', routes);
@@ -126,23 +121,33 @@ app.route('/backgrounds-upload')
         var fstream;
         req.pipe(req.busboy);
         req.busboy.on('file', function (fieldname, file, filename) {
-            console.log("Uploading: " + filename);
+            var allowedExtensions = ['jpg', 'jpeg', 'png'];
+            var extension = filename.split('.').pop().toLowerCase();
 
-            try {
-                fs.ensureDirSync(backgrounddir)
-            } catch (err) {
-                console.log('Cannot Create Background DIR ')
+            if (allowedExtensions.indexOf(extension) > -1) {
+                console.log("Uploading: " + filename);
+
+                try {
+                    fs.ensureDirSync(backgrounddir)
+                } catch (err) {
+                    console.log('Cannot Create Background DIR ')
+                }
+
+                var properfilename = filename.replace(/ /g,'-');
+                fstream = fs.createWriteStream('/data/backgrounds/' + properfilename);
+                file.pipe(fstream);
+                fstream.on('close', function () {
+                    console.log("Upload Finished of " + properfilename);
+                    var socket= io.connect('http://localhost:3000');
+                    socket.emit('regenerateThumbnails', '');
+                    res.status(201);
+                    //res.redirect('/');
+                });
+            } else {
+                console.log("Background file format not allowed " + filename);
             }
-            var properfilename = filename.replace(/ /g,'-');
-            fstream = fs.createWriteStream('/data/backgrounds/' + properfilename);
-            file.pipe(fstream);
-            fstream.on('close', function () {
-                console.log("Upload Finished of " + properfilename);
-                var socket= io.connect('http://localhost:3000');
-                socket.emit('regenerateThumbnails', '');
-                res.status(201);
-                //res.redirect('/');
-            });
+
+
         });
     });
 

@@ -220,8 +220,12 @@ ControllerNetworkfs.prototype.mountShare = function (data) {
 	}
 
 	var mountpoint = '/mnt/NAS/' +  mountid;
+	var createDir = true;
+    if (fs.existsSync(mountpoint)) {
+        createDir = false;
+    }
 
-	mountutil.mount(pointer, mountpoint, {"createDir": true, "fstype": fstype, "fsopts": fsopts}, function (result) {
+	mountutil.mount(pointer, mountpoint, {"createDir": createDir, "fstype": fstype, "fsopts": fsopts}, function (result) {
 		if (result.error) {
 
 			if (result.error.indexOf('Permission denied') >= 0) {
@@ -350,6 +354,13 @@ ControllerNetworkfs.prototype.addShare = function (data) {
 		return defer.promise;
 	}
 
+	//Path is required
+	if (data['path'] == null) {
+        self.commandRouter.pushToastMessage('warning', self.commandRouter.getI18nString('COMMON.MY_MUSIC'), self.commandRouter.getI18nString('NETWORKFS.ERROR_PATH_UNDEFINED'));
+        defer.reject(new Error('Share path must be defined'));
+        return defer.promise;
+	}
+
 	var ip = data['ip'];
 	var path = data['path'];
 	var fstype = data['fstype'];
@@ -367,6 +378,15 @@ ControllerNetworkfs.prototype.addShare = function (data) {
 		 */
 		path = path.replace(/\/+/g,'/');
 		path = path.replace(/^\//,'');
+	}
+	if (fstype === 'nfs') {
+		/* NFS mounts require an absolute path for the exported directory -
+		 * enforce a leading / on the path.
+		 */
+		path = path.replace(/^\s+/,'');
+		if ( ! path.startsWith('/') ) {
+			path = '/' + path;
+		}
 	}
 
 	var uuid = self.getShare(name, ip, path);
@@ -873,7 +893,9 @@ ControllerNetworkfs.prototype.getLabelForSelect = function (options, key) {
 ControllerNetworkfs.prototype.onPlayerNameChanged = function () {
     var self = this;
 
-    return self.writeSMBConf();
+    setTimeout(function() {
+        return self.writeSMBConf();
+	}, 10000)
 };
 
 
@@ -915,4 +937,59 @@ ControllerNetworkfs.prototype.writeSMBConf = function () {
                 });
             }
         });
+
+    exec('/usr/bin/sudo /bin/chmod 777 /data/INTERNAL', {uid:1000,gid:1000},function (error, stdout, stderr) {
+        if (error != null) {
+            self.logger.info('Error setting /data/internal perms: ' + error);
+        } else {
+			self.logger.info('Internal perms successfully set');
+        }
+    });
+};
+
+ControllerNetworkfs.prototype.onVolumioReboot = function () {
+    var self = this;
+
+    return self.umountAllShares();
+};
+
+ControllerNetworkfs.prototype.onVolumioShutdown = function () {
+	var self = this;
+
+    return self.umountAllShares();
+};
+
+ControllerNetworkfs.prototype.umountAllShares = function () {
+	var self = this;
+
+    var defer = libQ.defer();
+	var shares = config.getKeys('NasMounts');
+    var nShares = shares.length;
+
+    if (nShares > 0) {
+		for (var i in shares) {
+			self.umountShare({'id':shares[i]});
+		}
+    }
+    defer.resolve('');
+
+	return defer.promise;
+};
+
+ControllerNetworkfs.prototype.umountShare = function (data) {
+    var self = this;
+
+    var defer = libQ.defer();
+    var key = "NasMounts." + data['id'];
+
+    if (config.has(key)) {
+        var mountidraw = config.get(key + '.name');
+        var mountid = mountidraw.replace(/[\s\n\\]/g, "_");
+        var mountpoint = '/mnt/NAS/' + mountid;
+        try {
+            execSync("/usr/bin/sudo /bin/umount -f " + mountpoint, { uid: 1000, gid: 1000, encoding: 'utf8', timeout: 10000 });
+		} catch(e) {
+			self.logger.error('Cannot umount share ' + mountid + ' : ' + e);
+		}
+    }
 };

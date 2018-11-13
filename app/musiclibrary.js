@@ -3,7 +3,6 @@
 var libQ = require('kew');
 var libFast = require('fast.js');
 var libCrypto = require('crypto');
-var libBase64Url = require('base64-url');
 var fs=require('fs-extra');
 
 // Define the CoreMusicLibrary class
@@ -14,6 +13,7 @@ function CoreMusicLibrary (commandRouter) {
 
 	// Save a reference to the parent commandRouter
 	self.commandRouter = commandRouter;
+    self.logger = self.commandRouter.logger;
 
 	// Start up a extra metadata handler
 	//self.metadataCache = new (require('./metadatacache.js'))(self);
@@ -105,8 +105,8 @@ function CoreMusicLibrary (commandRouter) {
         self.browseSources = fs.readJsonSync((sourcesJson),  'utf8', {throws: false});
     } else {
         self.browseSources = [{albumart: '/albumart?sourceicon=music_service/mpd/favouritesicon.png', name: 'Favourites', uri: 'favourites',plugin_type:'',plugin_name:''},
-            {albumart: '/albumart?sourceicon=music_service/mpd/playlisticon.svg', name: 'Playlists', uri: 'playlists',plugin_type:'music_service',plugin_name:'mpd'},
-            {albumart: '/albumart?sourceicon=music_service/mpd/musiclibraryicon.svg', name: 'Music Library', uri: 'music-library',plugin_type:'music_service',plugin_name:'mpd'},
+            {albumart: '/albumart?sourceicon=music_service/mpd/playlisticon.png', name: 'Playlists', uri: 'playlists',plugin_type:'music_service',plugin_name:'mpd'},
+            {albumart: '/albumart?sourceicon=music_service/mpd/musiclibraryicon.png', name: 'Music Library', uri: 'music-library',plugin_type:'music_service',plugin_name:'mpd'},
             {albumart: '/albumart?sourceicon=music_service/mpd/artisticon.png',name: 'Artists', uri: 'artists://',plugin_type:'music_service',plugin_name:'mpd'},
             {albumart: '/albumart?sourceicon=music_service/mpd/albumicon.png',name: 'Albums', uri: 'albums://',plugin_type:'music_service',plugin_name:'mpd'},
             {albumart: '/albumart?sourceicon=music_service/mpd/genreicon.png',name: 'Genres', uri: 'genres://',plugin_type:'music_service',plugin_name:'mpd'}
@@ -307,34 +307,38 @@ CoreMusicLibrary.prototype.executeBrowseSource = function(curUri) {
 
     var response;
 	//console.log('--------------------------'+curUri)
-
-    if (curUri.startsWith('favourites')) {
-        return self.commandRouter.playListManager.listFavourites(curUri);
-    }
-    else if (curUri.startsWith('search')) {
-        var splitted = curUri.split('/');
-
-        return this.search({"value": splitted[2]});
-    } else if (curUri.startsWith('playlists') || curUri.startsWith('artists://') || curUri.startsWith('albums://') || curUri.startsWith('genres://')) {
-            return self.commandRouter.executeOnPlugin('music_service','mpd','handleBrowseUri',curUri);
-    } else if (curUri.startsWith('upnp')) {
-    		return self.commandRouter.executeOnPlugin('music_service','upnp_browser','handleBrowseUri',curUri);
-	} else {
-        for(var i in self.browseSources)
-        {
-            var source=self.browseSources[i];
-
-            if(curUri.startsWith(source.uri))
-            {
-                return self.commandRouter.executeOnPlugin(source.plugin_type,source.plugin_name,'handleBrowseUri',curUri);
-            }
+	if (curUri != undefined) {
+        if (curUri.startsWith('favourites')) {
+            return self.commandRouter.playListManager.listFavourites(curUri);
         }
+        else if (curUri.startsWith('search')) {
+            var splitted = curUri.split('/');
 
+            return this.search({"value": splitted[2]});
+        } else if (curUri.startsWith('playlists') || curUri.startsWith('artists://') || curUri.startsWith('albums://') || curUri.startsWith('genres://')) {
+            return self.commandRouter.executeOnPlugin('music_service','mpd','handleBrowseUri',curUri);
+        } else if (curUri.startsWith('upnp')) {
+            return self.commandRouter.executeOnPlugin('music_service','upnp_browser','handleBrowseUri',curUri);
+        } else {
+            for(var i in self.browseSources)
+            {
+                var source=self.browseSources[i];
+
+                if(curUri.startsWith(source.uri))
+                {
+                    return self.commandRouter.executeOnPlugin(source.plugin_type,source.plugin_name,'handleBrowseUri',curUri);
+                }
+            }
+
+            var promise=libQ.defer();
+            promise.resolve({});
+            return promise.promise;
+        }
+	} else {
         var promise=libQ.defer();
         promise.resolve({});
         return promise.promise;
-    }
-
+	}
 }
 
 
@@ -347,9 +351,9 @@ CoreMusicLibrary.prototype.search = function(data) {
 	var searcharray = [];
 	if (data.value) {
 		if (data.type) {
-			query = {"value": data.value, "type": data.type};
+			query = {"value": data.value, "type": data.type, "uri":data.uri};
 		} else {
-			query = {"value": data.value};
+			query = {"value": data.value, "uri":data.uri};
 		}
 
         var executed=[];
@@ -441,15 +445,14 @@ CoreMusicLibrary.prototype.search = function(data) {
 
 		libQ.all(deferArray)
             .then(function (result) {
-
-                console.log("GOT EVERYTHING, SHOWING SEARCH RESULT")
+				self.logger.info('All search sources collected, pushing search results');
 
                 var searchResult={
                     "navigation": {
+                    	"isSearchResult": true,
                         "lists": []
                     }
                 };
-
 
                 for(var i in result)
                 {
@@ -459,7 +462,7 @@ CoreMusicLibrary.prototype.search = function(data) {
                 defer.resolve(searchResult);
             })
             .fail(function (err) {
-                console.log('Search error in Plugin: '+source.plugin_name+". Details: "+err);
+                self.loger.error('Search error in Plugin: '+source.plugin_name+". Details: "+err);
                 defer.reject(new Error());
             });
 	} else {
@@ -467,37 +470,6 @@ CoreMusicLibrary.prototype.search = function(data) {
 	}
 	return defer.promise;
 }
-
-
-// Helper functions ------------------------------------------------------------------------------------
-
-// Create a URL safe hashkey for a given string. The result will be a constant length string containing
-// upper and lower case letters, numbers, '-', and '_'.
-function convertStringToHashkey(input) {
-    if (input === null) {
-        input = '';
-
-    }
-
-	return libBase64Url.escape(libCrypto.createHash('sha256').update(input, 'utf8').digest('base64'));
-}
-
-// Takes a nested array of strings and produces a comma-delmited string. Example:
-// ['a', [['b', 'c'], 'd']] -> 'a, b, c, d'
-function flattenArrayToCSV(arrayInput) {
-	if (typeof arrayInput === "object") {
-		return libFast.reduce(arrayInput, function(sReturn, curEntry, nIndex) {
-			if (nIndex > 0) {
-				return sReturn + ", " + flattenArrayToCSV(curEntry);
-			} else {
-				return flattenArrayToCSV(curEntry);
-			}
-		},"");
-	} else {
-		return arrayInput;
-	}
-}
-
 
 CoreMusicLibrary.prototype.updateBrowseSourcesLang = function() {
 	var self = this;
@@ -539,6 +511,7 @@ CoreMusicLibrary.prototype.updateBrowseSourcesLang = function() {
 
 		}
 	}
+	return this.commandRouter.broadcastMessage('pushBrowseSources', self.browseSources);
 }
 
 CoreMusicLibrary.prototype.goto=function(data){
